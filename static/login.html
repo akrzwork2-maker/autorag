@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VerifAI — Sign In</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <style>
+        body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .auth-container {
+            width: 100%; max-width: 400px; padding: 0 1.5rem;
+        }
+        .auth-card {
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 12px; padding: 2.5rem 2rem; box-shadow: var(--shadow-lg);
+        }
+        .auth-brand {
+            display: flex; align-items: center; gap: .6rem;
+            justify-content: center; margin-bottom: 1.75rem;
+        }
+        .auth-brand-logo {
+            width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+            background: var(--accent); border-radius: 10px; color: #fff;
+        }
+        .auth-brand-logo .lucide { width: 22px; height: 22px; }
+        .auth-brand-text { font-size: 1.4rem; font-weight: 700; color: var(--text); }
+        .auth-brand-tag { font-size: .65rem; color: var(--text-muted); font-weight: 600; letter-spacing: .5px; }
+        .auth-title { text-align: center; font-size: 1.15rem; font-weight: 600; margin-bottom: .3rem; }
+        .auth-subtitle { text-align: center; font-size: .84rem; color: var(--text-dim); margin-bottom: 1.5rem; }
+        .auth-field { margin-bottom: 1rem; }
+        .auth-field label {
+            display: block; font-size: .8rem; font-weight: 600; color: var(--text-dim);
+            margin-bottom: .3rem; text-transform: uppercase; letter-spacing: .4px;
+        }
+        .auth-field input {
+            width: 100%; padding: .65rem .85rem;
+            background: var(--surface); color: var(--text);
+            border: 1px solid var(--border); border-radius: 6px;
+            font-family: var(--font); font-size: .9rem; outline: none;
+        }
+        .auth-field input:focus { border-color: var(--accent); }
+        .auth-btn {
+            width: 100%; padding: .7rem; border-radius: 6px;
+            background: var(--accent); color: #fff; font-weight: 600;
+            font-size: .9rem; border: none; cursor: pointer; transition: background .15s;
+            margin-top: .5rem; display: flex; align-items: center; justify-content: center; gap: .4rem;
+        }
+        .auth-btn:hover { background: var(--accent-hover); }
+        .auth-btn:disabled { opacity: .5; cursor: not-allowed; }
+        .auth-switch {
+            text-align: center; margin-top: 1.25rem; font-size: .84rem; color: var(--text-dim);
+        }
+        .auth-switch a { color: var(--accent); cursor: pointer; font-weight: 600; }
+        .auth-switch a:hover { text-decoration: underline; }
+        .auth-error {
+            background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.25);
+            color: var(--red); border-radius: 6px; padding: .5rem .75rem;
+            font-size: .82rem; margin-bottom: 1rem; display: none;
+        }
+        .theme-btn {
+            position: fixed; top: 1rem; right: 1rem;
+            width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+            background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+            color: var(--text-dim); cursor: pointer;
+        }
+        .theme-btn:hover { color: var(--text); border-color: var(--accent); }
+        .theme-btn .lucide { width: 18px; height: 18px; }
+    </style>
+</head>
+<body>
+
+<button class="theme-btn" id="auth-theme-toggle" title="Toggle theme"><i data-lucide="moon"></i></button>
+
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <div class="auth-brand-logo"><i data-lucide="sparkles"></i></div>
+            <div>
+                <div class="auth-brand-text">VerifAI</div>
+                <div class="auth-brand-tag">AutoRAG++</div>
+            </div>
+        </div>
+
+        <div id="login-form">
+            <div class="auth-title">Welcome back</div>
+            <div class="auth-subtitle">Sign in to your account</div>
+            <div class="auth-error" id="login-error"></div>
+            <div class="auth-field">
+                <label>Email</label>
+                <input type="email" id="login-email" placeholder="you@example.com" autocomplete="email">
+            </div>
+            <div class="auth-field">
+                <label>Password</label>
+                <input type="password" id="login-password" placeholder="Enter your password" autocomplete="current-password">
+            </div>
+            <button class="auth-btn" id="login-btn"><i data-lucide="log-in"></i> Sign In</button>
+            <div class="auth-switch">Don't have an account? <a id="show-register">Create one</a></div>
+        </div>
+
+        <div id="register-form" style="display:none">
+            <div class="auth-title">Create account</div>
+            <div class="auth-subtitle">Get started with VerifAI</div>
+            <div class="auth-error" id="register-error"></div>
+            <div class="auth-field">
+                <label>Full Name</label>
+                <input type="text" id="register-name" placeholder="John Doe" autocomplete="name">
+            </div>
+            <div class="auth-field">
+                <label>Email</label>
+                <input type="email" id="register-email" placeholder="you@example.com" autocomplete="email">
+            </div>
+            <div class="auth-field">
+                <label>Password</label>
+                <input type="password" id="register-password" placeholder="At least 6 characters" autocomplete="new-password">
+            </div>
+            <button class="auth-btn" id="register-btn"><i data-lucide="user-plus"></i> Create Account</button>
+            <div class="auth-switch">Already have an account? <a id="show-login">Sign in</a></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const savedTheme = localStorage.getItem('verifai-theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+
+    document.getElementById('auth-theme-toggle').addEventListener('click', () => {
+        const curr = document.documentElement.getAttribute('data-theme');
+        const next = curr === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('verifai-theme', next);
+        const icon = document.querySelector('#auth-theme-toggle i');
+        icon.setAttribute('data-lucide', next === 'dark' ? 'moon' : 'sun');
+        lucide.createIcons();
+    });
+
+    document.getElementById('show-register').addEventListener('click', () => {
+        document.getElementById('login-form').style.display = 'none';
+        document.getElementById('register-form').style.display = '';
+    });
+    document.getElementById('show-login').addEventListener('click', () => {
+        document.getElementById('register-form').style.display = 'none';
+        document.getElementById('login-form').style.display = '';
+    });
+
+    (async () => {
+        const token = localStorage.getItem('verifai_token');
+        if (token) {
+            try {
+                const res = await fetch('/api/auth/me', {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (res.ok) {
+                    window.location.href = '/';
+                    return;
+                }
+            } catch (_) {}
+            localStorage.removeItem('verifai_token');
+        }
+    })();
+
+    function showError(id, msg) {
+        const el = document.getElementById(id);
+        el.textContent = msg;
+        el.style.display = '';
+    }
+    function hideError(id) {
+        document.getElementById(id).style.display = 'none';
+    }
+
+    document.getElementById('login-btn').addEventListener('click', async () => {
+        hideError('login-error');
+        const email = document.getElementById('login-email').value.trim();
+        const password = document.getElementById('login-password').value;
+        if (!email || !password) { showError('login-error', 'Please fill in all fields'); return; }
+
+        const btn = document.getElementById('login-btn');
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showError('login-error', data.detail || 'Login failed');
+                btn.disabled = false;
+                return;
+            }
+            localStorage.setItem('verifai_token', data.token);
+            localStorage.setItem('verifai_user', JSON.stringify(data.user));
+            window.location.href = '/';
+        } catch (e) {
+            showError('login-error', 'Network error. Please try again.');
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById('register-btn').addEventListener('click', async () => {
+        hideError('register-error');
+        const name = document.getElementById('register-name').value.trim();
+        const email = document.getElementById('register-email').value.trim();
+        const password = document.getElementById('register-password').value;
+        if (!name || !email || !password) { showError('register-error', 'Please fill in all fields'); return; }
+        if (password.length < 6) { showError('register-error', 'Password must be at least 6 characters'); return; }
+
+        const btn = document.getElementById('register-btn');
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, password }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showError('register-error', data.detail || 'Registration failed');
+                btn.disabled = false;
+                return;
+            }
+            localStorage.setItem('verifai_token', data.token);
+            localStorage.setItem('verifai_user', JSON.stringify(data.user));
+            window.location.href = '/';
+        } catch (e) {
+            showError('register-error', 'Network error. Please try again.');
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById('login-password').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('login-btn').click();
+    });
+    document.getElementById('register-password').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('register-btn').click();
+    });
+
+    lucide.createIcons();
+</script>
+</body>
+</html>

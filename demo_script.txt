@@ -1,0 +1,88 @@
+VerifAI Demo Script — NIST Incident Response (SP 800-61r2)
+===========================================================
+
+STEP 1: LOGIN
+─────────────
+Register a new account or login with existing credentials.
+
+
+STEP 2: KNOWLEDGE BASE — Upload PDF
+────────────────────────────────────
+Upload: NIST.SP.800-61r2.pdf
+Expected: ~40-60 chunks indexed
+
+
+STEP 3: KNOWLEDGE BASE — Augment
+─────────────────────────────────
+Enter topic: "NIST incident response" and click "Augment KB".
+Expected: Chunks from both Wikipedia articles and Web search results.
+Shows: Source badges — Uploaded (blue), Wikipedia (yellow), Web (green).
+
+
+STEP 4: Q&A — Query 1 (Straightforward)
+────────────────────────────────────────
+Query: What are the four phases of the incident response lifecycle?
+
+Expected: High confidence, clear citations from NIST document.
+Shows: Streaming steps, source citations, confidence score.
+
+
+STEP 5: Q&A — Query 2 (Specific detail)
+────────────────────────────────────────
+Query: What indicators suggest a system has been compromised by malware?
+
+Expected: Pulls specific signs/symptoms listed in the NIST guide.
+Shows: Multiple source chunks used, detailed answer.
+
+
+STEP 6: Q&A — Query 3 (Triggers calibration)
+─────────────────────────────────────────────
+Query: How should forensic evidence be handled to maintain chain of custody during an incident?
+
+Expected: May trigger calibration loop (fetches Wikipedia + Web for forensic/chain of custody content).
+Shows: Calibration cycle in the streaming trace, k and lambda adjustments, fetch step showing Wikipedia + Web counts.
+
+
+STEP 7: FACT VERIFIER — True claim
+───────────────────────────────────
+Paste: NIST recommends that organizations establish an incident response policy as part of the preparation phase. The policy should define which events are considered incidents and outline the structure of the incident response team.
+
+Expected: VERIFIED verdicts on most claims.
+
+
+STEP 8: FACT VERIFIER — False claim
+────────────────────────────────────
+Paste: According to NIST, organizations should immediately disconnect all network devices when a security incident is detected. NIST also states that law enforcement should never be contacted during incident response to avoid legal complications.
+
+Expected: CONTRADICTED verdicts — NIST does not recommend blanket disconnection and does recommend contacting law enforcement.
+
+
+STEP 9: FACT VERIFIER — Mixed claim
+────────────────────────────────────
+Paste: The preparation phase includes establishing communication procedures and acquiring necessary tools. NIST mandates that all incidents must be resolved within 24 hours of detection.
+
+Expected: First sentence VERIFIED, second sentence CONTRADICTED (no such mandate exists).
+
+
+STEP 10: DASHBOARD
+──────────────────
+Navigate to Dashboard tab.
+Shows: Query history from steps 4-6, confidence chart, model usage stats.
+
+
+STEP 11: PIPELINE X-RAY
+────────────────────────
+Query: What specific steps does NIST recommend for containing a denial-of-service attack?
+
+Expected: Full RAG gives precise NIST procedures with citations.
+          Basic RAG gives partial answer.
+          LLM-only gives generic advice without NIST specifics.
+Shows: Side-by-side confidence comparison, source count difference.
+
+
+STEP 12: SETTINGS
+─────────────────
+Show current settings.
+Change confidence threshold from 0.70 to 0.60.
+Change preferred provider if multiple API keys configured.
+Shows: Runtime configurability.

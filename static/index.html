@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VerifAI — AutoRAG++</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+
+<aside id="sidebar" class="sidebar">
+    <div class="sidebar-brand">
+        <div class="brand-logo"><i data-lucide="sparkles"></i></div>
+        <div class="brand-text">
+            <span class="brand-name">VerifAI</span>
+            <span class="brand-tag">AutoRAG++</span>
+        </div>
+    </div>
+    <nav class="sidebar-nav">
+        <a href="#" class="nav-link active" data-page="dashboard"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></a>
+        <a href="#" class="nav-link" data-page="qa"><i data-lucide="brain"></i><span>Q&amp;A Engine</span></a>
+        <a href="#" class="nav-link" data-page="verify"><i data-lucide="shield-check"></i><span>Fact Verifier</span></a>
+        <a href="#" class="nav-link" data-page="xray"><i data-lucide="microscope"></i><span>Pipeline X-Ray</span></a>
+        <a href="#" class="nav-link" data-page="kb"><i data-lucide="database"></i><span>Knowledge Base</span></a>
+    </nav>
+    <div class="sidebar-footer">
+        <a href="#" class="nav-link" data-page="settings"><i data-lucide="settings"></i><span>Settings</span></a>
+    </div>
+</aside>
+<div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+<header id="header">
+    <div class="header-left">
+        <button id="sidebar-toggle" class="icon-btn" title="Toggle sidebar"><i data-lucide="menu"></i></button>
+        <div class="header-brand">
+            <div class="header-logo"><i data-lucide="sparkles"></i></div>
+            <span class="header-title">VerifAI</span>
+        </div>
+    </div>
+    <div class="header-right">
+        <button id="theme-toggle" class="icon-btn" title="Toggle light/dark mode"><i data-lucide="moon"></i></button>
+        <button class="icon-btn" onclick="navigateTo('settings')" title="Settings"><i data-lucide="settings"></i></button>
+        <div class="header-avatar" title="User"><i data-lucide="circle-user-round"></i></div>
+    </div>
+</header>
+
+<div id="content-wrapper">
+
+<main id="page-dashboard" class="page active">
+    <div class="page-header"><i data-lucide="layout-dashboard"></i><h1>Dashboard</h1></div>
+    <div class="metrics-row" id="dash-metrics"></div>
+    <div class="two-col-eq" id="dash-charts-row">
+        <div class="card" id="dash-conf-card" style="display:none">
+            <h3>Confidence Trend</h3>
+            <canvas id="dash-conf-chart" height="220"></canvas>
+        </div>
+        <div class="card" id="dash-scores-card" style="display:none">
+            <h3>Semantic vs Factual Scores</h3>
+            <canvas id="dash-scores-chart" height="220"></canvas>
+        </div>
+    </div>
+    <div class="two-col-eq">
+        <div class="card" id="dash-time-card" style="display:none">
+            <h3>Response Time</h3>
+            <canvas id="dash-time-chart" height="200"></canvas>
+        </div>
+        <div class="card" id="dash-model-card" style="display:none">
+            <h3>Engine Usage</h3>
+            <canvas id="dash-model-chart" height="200"></canvas>
+        </div>
+    </div>
+    <div class="card" id="dash-recent-card" style="display:none;margin-top:.75rem">
+        <h3>Recent Queries</h3>
+        <div id="dash-recent-list"></div>
+    </div>
+    <div class="grid-4" style="margin-top:1.5rem">
+        <div class="feature-card" data-goto="qa">
+            <div class="feature-icon"><i data-lucide="brain"></i></div>
+            <div class="feature-title">Q&amp;A Engine</div>
+            <div class="feature-desc">Pipeline with live tracing</div>
+        </div>
+        <div class="feature-card" data-goto="verify">
+            <div class="feature-icon"><i data-lucide="shield-check"></i></div>
+            <div class="feature-title">Fact Verifier</div>
+            <div class="feature-desc">Automated claim verification</div>
+        </div>
+        <div class="feature-card" data-goto="xray">
+            <div class="feature-icon"><i data-lucide="microscope"></i></div>
+            <div class="feature-title">Pipeline X-Ray</div>
+            <div class="feature-desc">3-way comparison</div>
+        </div>
+        <div class="feature-card" data-goto="kb">
+            <div class="feature-icon"><i data-lucide="database"></i></div>
+            <div class="feature-title">Knowledge Base</div>
+            <div class="feature-desc">Upload &amp; manage docs</div>
+        </div>
+    </div>
+</main>
+
+<main id="page-qa" class="page">
+    <div class="page-header"><i data-lucide="brain"></i><h1>Q&amp;A Engine</h1><span class="badge">AutoRAG++</span></div>
+    <div class="chat-input-wrap">
+        <input type="text" id="qa-input" placeholder="Ask anything about your knowledge base..." autocomplete="off">
+        <button id="qa-btn" class="btn-primary"><i data-lucide="send"></i></button>
+        <span id="qa-spinner" class="inline-spinner" style="display:none"></span>
+    </div>
+    <div id="qa-recent" class="recent-searches"></div>
+    <div id="qa-output" style="display:none">
+        <div class="two-col">
+            <div class="col-left">
+                <h3 style="margin-bottom:.5rem">Pipeline Trace</h3>
+                <div id="qa-timeline" class="timeline"></div>
+            </div>
+            <div class="col-right">
+                <div id="qa-score" style="margin-bottom:.5rem"></div>
+                <div class="metrics-row" id="qa-metrics"></div>
+                <div class="answer-box" id="qa-answer"></div>
+                <div class="caption" id="qa-model-info"></div>
+                <details id="qa-sources-wrap" style="display:none;margin-top:.75rem">
+                    <summary>Sources (<span id="qa-src-count">0</span>)</summary>
+                    <div id="qa-sources"></div>
+                </details>
+            </div>
+        </div>
+    </div>
+</main>
+
+<main id="page-verify" class="page">
+    <div class="page-header"><i data-lucide="shield-check"></i><h1>Fact Verifier</h1><span class="badge">Verification Engine</span></div>
+    <textarea id="fv-input" rows="5" placeholder="Paste text to verify against the knowledge base..."></textarea>
+    <div class="btn-row">
+        <button id="fv-btn" class="btn-primary"><i data-lucide="circle-check"></i> Verify</button>
+    </div>
+    <div id="fv-output" style="display:none">
+        <div id="fv-pipeline"></div>
+        <div id="fv-trust-badge"></div>
+        <div id="fv-summary"></div>
+        <div class="metrics-row" id="fv-metrics"></div>
+        <div id="fv-sources"></div>
+        <div class="two-col-eq">
+            <div><canvas id="fv-pie" height="260"></canvas></div>
+            <div><canvas id="fv-bar" height="260"></canvas></div>
+        </div>
+        <div id="fv-highlight"></div>
+        <div id="fv-claims"></div>
+    </div>
+</main>
+
+<main id="page-xray" class="page">
+    <div class="page-header"><i data-lucide="microscope"></i><h1>Pipeline X-Ray</h1><span class="badge">3-Way Comparison</span></div>
+    <div class="input-row">
+        <input type="text" id="xray-input" placeholder="Enter a query to compare..." autocomplete="off">
+        <button id="xray-btn" class="btn-primary"><i data-lucide="git-compare"></i> Compare</button>
+    </div>
+    <div id="xray-examples" class="example-chips"></div>
+    <div id="xray-progress" style="display:none">
+        <div class="progress-bar"><div class="progress-fill xray-animate" id="xray-pbar"></div></div>
+        <div class="caption" id="xray-ptext">Running...</div>
+    </div>
+    <div id="xray-output" style="display:none">
+        <div class="two-col-eq">
+            <div><canvas id="xray-scores" height="300"></canvas></div>
+            <div><canvas id="xray-time" height="300"></canvas></div>
+        </div>
+        <div class="grid-3" id="xray-answers"></div>
+        <div class="card">
+            <h3>Detailed Comparison</h3>
+            <table id="xray-table"></table>
+        </div>
+    </div>
+</main>
+
+<main id="page-kb" class="page">
+    <div class="page-header"><i data-lucide="database"></i><h1>Knowledge Base</h1><span class="badge">Vector Store</span></div>
+    <div class="metrics-row" id="kb-metrics"></div>
+    <div class="tabs">
+        <button class="tab active" data-tab="kb-docs">Documents</button>
+        <button class="tab" data-tab="kb-upload">Upload PDF</button>
+        <button class="tab" data-tab="kb-search">Search</button>
+        <button class="tab" data-tab="kb-seed">Augment</button>
+    </div>
+    <div class="tab-content active" id="kb-docs">
+        <table id="kb-doc-table"></table>
+        <div id="kb-empty" class="empty-state"><h3>Knowledge Base is empty</h3><p>Upload a PDF or seed from Wikipedia to get started.</p></div>
+        <div id="kb-delete-row" class="input-row" style="display:none;margin-top:.75rem">
+            <select id="kb-del-select"></select>
+            <button id="kb-del-btn" class="btn-danger"><i data-lucide="trash-2"></i> Delete</button>
+        </div>
+    </div>
+    <div class="tab-content" id="kb-upload">
+        <div class="upload-area" id="kb-upload-area">
+            <input type="file" id="kb-file" accept=".pdf" hidden>
+            <div class="upload-icon"><i data-lucide="file-up"></i></div>
+            <p>Click to select a PDF or drag &amp; drop</p>
+            <div id="kb-file-name" class="filename"></div>
+        </div>
+        <button id="kb-upload-btn" class="btn-primary" style="display:none;margin-top:.75rem"><i data-lucide="upload"></i> Index Document</button>
+    </div>
+    <div class="tab-content" id="kb-search">
+        <div class="input-row" style="margin-bottom:.75rem">
+            <input type="text" id="kb-q" placeholder="Search the knowledge base...">
+            <input type="number" id="kb-k" value="5" min="1" max="20" style="width:60px">
+            <button id="kb-search-btn" class="btn-primary"><i data-lucide="search"></i> Search</button>
+        </div>
+        <div id="kb-results"></div>
+    </div>
+    <div class="tab-content" id="kb-seed">
+        <p class="caption" style="margin-bottom:.75rem">Fetch related articles from Wikipedia and the web to augment your knowledge base. Enter a topic or leave blank to auto-detect from your uploaded documents.</p>
+        <div class="input-row" style="margin-bottom:.75rem">
+            <input type="text" id="kb-seed-topic" placeholder="Topic (optional — auto-detects from your documents)">
+            <button id="kb-seed-btn" class="btn-primary"><i data-lucide="sprout"></i> Augment KB</button>
+        </div>
+        <div id="kb-seed-status" class="caption" style="margin-top:.5rem"></div>
+    </div>
+</main>
+
+<main id="page-settings" class="page">
+    <div class="page-header"><i data-lucide="settings"></i><h1>Settings</h1></div>
+
+    <div class="card">
+        <h3><i data-lucide="cpu"></i> LLM Provider</h3>
+        <p class="caption" style="margin-bottom:1rem">Select the preferred language model for all pipeline operations.</p>
+        <div class="settings-field">
+            <label for="settings-provider">Preferred Provider</label>
+            <select id="settings-provider">
+                <option value="auto">Auto — Best Available (5-model fallback)</option>
+                <option value="gemini">Gemini 2.0 Flash (1500 RPD)</option>
+                <option value="groq_primary">Groq Llama 3.3 70B</option>
+                <option value="groq_fallback">Groq Llama 3.1 8B</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3><i data-lucide="shield-check"></i> NLI Verification Thresholds</h3>
+        <p class="caption" style="margin-bottom:1rem">Controls the Fact Verifier verdicts and the Evaluator Agent's F<sub>c</sub> scoring. Based on DeBERTa entailment probabilities.</p>
+        <div class="settings-field">
+            <label>Verified Threshold <span class="setting-val" id="sv-verified-val">0.70</span></label>
+            <input type="range" id="sv-verified" min="0.50" max="0.95" step="0.05" value="0.70" class="setting-slider green-slider">
+            <p class="setting-hint">Claims with NLI score ≥ this are marked <strong style="color:var(--green)">VERIFIED</strong></p>
+        </div>
+        <div class="settings-field">
+            <label>Contradicted Threshold <span class="setting-val" id="sv-contradicted-val">0.30</span></label>
+            <input type="range" id="sv-contradicted" min="0.05" max="0.50" step="0.05" value="0.30" class="setting-slider red-slider">
+            <p class="setting-hint">Claims with NLI score ≤ this are marked <strong style="color:var(--red)">CONTRADICTED</strong></p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3><i data-lucide="sliders-horizontal"></i> Calibration Parameters</h3>
+        <p class="caption" style="margin-bottom:1rem">Controls the confidence-based re-retrieval loop (Paper Section IV-C, Eq. 3). When C<sub>f</sub> falls below τ, the system automatically re-retrieves and re-reasons.</p>
+        <div class="settings-field">
+            <label>Confidence Threshold τ <span class="setting-val" id="sv-confidence-val">0.70</span></label>
+            <input type="range" id="sv-confidence" min="0.30" max="0.95" step="0.05" value="0.70" class="setting-slider accent-slider">
+            <p class="setting-hint">If C<sub>f</sub> = 2·S<sub>c</sub>·F<sub>c</sub> / (S<sub>c</sub>+F<sub>c</sub>) &lt; τ, triggers re-retrieval cycle</p>
+        </div>
+        <div class="settings-field">
+            <label>Max Calibration Cycles <span class="setting-val" id="sv-cycles-val">2</span></label>
+            <input type="range" id="sv-cycles" min="1" max="5" step="1" value="2" class="setting-slider accent-slider">
+            <p class="setting-hint">Maximum re-retrieval iterations before returning best result</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <button id="settings-save" class="btn-primary"><i data-lucide="save"></i> Save All Settings</button>
+        <div id="settings-changes" class="settings-changes"></div>
+    </div>
+
+    <div class="card">
+        <h3><i data-lucide="activity"></i> System Status</h3>
+        <div class="metrics-row" id="settings-metrics"></div>
+    </div>
+</main>
+
+</div>
+
+<div id="spinner" class="spinner-overlay" style="display:none">
+    <div class="spinner-ring"></div>
+    <div class="spinner-text" id="spinner-text">Processing...</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
