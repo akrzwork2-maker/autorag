@@ -1,46 +1,63 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import bcrypt
 import jwt
-from motor.motor_asyncio import AsyncIOMotorClient
 
 logger = logging.getLogger(__name__)
 
-MONGO_URI = os.getenv("MONGODB_URI", "")
+_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "users.db"
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24
-DB_NAME = "verifai"
 
-_client: AsyncIOMotorClient | None = None
-_db = None
+_conn: sqlite3.Connection | None = None
+_enabled = False
 
 
 async def init_db():
-    global _client, _db
-    if not MONGO_URI:
-        logger.warning("MONGODB_URI not set — auth disabled")
+    """Initialise local SQLite user database."""
+    global _conn, _enabled
+    try:
+        _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _conn = sqlite3.connect(str(_DB_PATH), check_same_thread=False)
+        _conn.row_factory = sqlite3.Row
+        _conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE,
+                password TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        _conn.commit()
+        _enabled = True
+        logger.info("Auth database ready — %s", _DB_PATH)
+        return True
+    except Exception as e:
+        logger.warning("Auth database init failed: %s", e)
+        _conn = None
+        _enabled = False
         return False
-    _client = AsyncIOMotorClient(MONGO_URI)
-    _db = _client[DB_NAME]
-    await _db.users.create_index("email", unique=True)
-    logger.info("MongoDB connected — database: %s", DB_NAME)
-    return True
 
 
 async def close_db():
-    global _client
-    if _client:
-        _client.close()
-        _client = None
+    global _conn, _enabled
+    if _conn:
+        _conn.close()
+        _conn = None
+    _enabled = False
 
 
 def is_auth_enabled() -> bool:
-    return _db is not None
+    return _enabled
 
 
 def hash_password(password: str) -> str:
@@ -74,18 +91,17 @@ async def create_user(name: str, email: str, password: str) -> dict:
         raise RuntimeError("Auth not configured")
 
     email = email.strip().lower()
-    existing = await _db.users.find_one({"email": email})
-    if existing:
+    row = _conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+    if row:
         raise ValueError("Email already registered")
 
-    doc = {
-        "name": name.strip(),
-        "email": email,
-        "password": hash_password(password),
-        "created_at": datetime.now(timezone.utc),
-    }
-    result = await _db.users.insert_one(doc)
-    return {"id": str(result.inserted_id), "name": doc["name"], "email": doc["email"]}
+    user_id = uuid.uuid4().hex
+    _conn.execute(
+        "INSERT INTO users (id, name, email, password, created_at) VALUES (?, ?, ?, ?, ?)",
+        (user_id, name.strip(), email, hash_password(password), datetime.now(timezone.utc).isoformat()),
+    )
+    _conn.commit()
+    return {"id": user_id, "name": name.strip(), "email": email}
 
 
 async def authenticate_user(email: str, password: str) -> dict | None:
@@ -93,19 +109,18 @@ async def authenticate_user(email: str, password: str) -> dict | None:
         raise RuntimeError("Auth not configured")
 
     email = email.strip().lower()
-    user = await _db.users.find_one({"email": email})
-    if not user:
+    row = _conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+    if not row:
         return None
-    if not verify_password(password, user["password"]):
+    if not verify_password(password, row["password"]):
         return None
-    return {"id": str(user["_id"]), "name": user["name"], "email": user["email"]}
+    return {"id": row["id"], "name": row["name"], "email": row["email"]}
 
 
 async def get_user_by_id(user_id: str) -> dict | None:
     if not is_auth_enabled():
         return None
-    from bson import ObjectId
-    user = await _db.users.find_one({"_id": ObjectId(user_id)})
-    if not user:
+    row = _conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
         return None
-    return {"id": str(user["_id"]), "name": user["name"], "email": user["email"]}
+    return {"id": row["id"], "name": row["name"], "email": row["email"]}

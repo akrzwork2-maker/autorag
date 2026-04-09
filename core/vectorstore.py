@@ -26,7 +26,7 @@ class VectorStore:
     def _user_filter(self, user_id: str | None) -> dict | None:
         if not user_id:
             return None
-        return {"$or": [{"user_id": user_id}, {"user_id": self.SYSTEM_USER}]}
+        return {"user_id": user_id}
 
     def _owner_filter(self, user_id: str | None) -> dict | None:
         if not user_id:

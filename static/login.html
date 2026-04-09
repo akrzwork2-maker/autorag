@@ -69,6 +69,7 @@
         }
         .theme-btn:hover { color: var(--text); border-color: var(--accent); }
         .theme-btn .lucide { width: 18px; height: 18px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -165,10 +166,19 @@
     function showError(id, msg) {
         const el = document.getElementById(id);
         el.textContent = msg;
-        el.style.display = '';
+        el.style.display = 'block';
     }
     function hideError(id) {
         document.getElementById(id).style.display = 'none';
+    }
+    function setLoading(btn, loading) {
+        btn.disabled = loading;
+        if (loading) {
+            btn.dataset.origText = btn.innerHTML;
+            btn.innerHTML = '<span style="display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite"></span> Please wait...';
+        } else {
+            btn.innerHTML = btn.dataset.origText || btn.innerHTML;
+        }
     }
 
     document.getElementById('login-btn').addEventListener('click', async () => {
@@ -178,7 +188,7 @@
         if (!email || !password) { showError('login-error', 'Please fill in all fields'); return; }
 
         const btn = document.getElementById('login-btn');
-        btn.disabled = true;
+        setLoading(btn, true);
         try {
             const res = await fetch('/api/auth/login', {
                 method: 'POST',
@@ -188,7 +198,7 @@
             const data = await res.json();
             if (!res.ok) {
                 showError('login-error', data.detail || 'Login failed');
-                btn.disabled = false;
+                setLoading(btn, false);
                 return;
             }
             localStorage.setItem('verifai_token', data.token);
@@ -196,7 +206,7 @@
             window.location.href = '/';
         } catch (e) {
             showError('login-error', 'Network error. Please try again.');
-            btn.disabled = false;
+            setLoading(btn, false);
         }
     });
 
@@ -209,7 +219,7 @@
         if (password.length < 6) { showError('register-error', 'Password must be at least 6 characters'); return; }
 
         const btn = document.getElementById('register-btn');
-        btn.disabled = true;
+        setLoading(btn, true);
         try {
             const res = await fetch('/api/auth/register', {
                 method: 'POST',
@@ -219,7 +229,7 @@
             const data = await res.json();
             if (!res.ok) {
                 showError('register-error', data.detail || 'Registration failed');
-                btn.disabled = false;
+                setLoading(btn, false);
                 return;
             }
             localStorage.setItem('verifai_token', data.token);
@@ -227,7 +237,7 @@
             window.location.href = '/';
         } catch (e) {
             showError('register-error', 'Network error. Please try again.');
-            btn.disabled = false;
+            setLoading(btn, false);
         }
     });
 
