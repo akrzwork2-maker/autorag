@@ -211,14 +211,12 @@ class RetrieverAgent(BaseAgent):
         l2: float,
         user_id: str | None,
     ) -> RetrievalResult:
-        if strategy == RetrievalStrategy.DENSE:
-            return self._retriever.retrieve_basic(query, k=k, user_id=user_id)
-        elif strategy == RetrievalStrategy.EXPANDED:
+        if strategy == RetrievalStrategy.EXPANDED:
             expanded_k = min(k + 3, k * 2)
             return self._retriever.retrieve(
                 query, k=expanded_k, lambda_1=l1, lambda_2=l2, user_id=user_id,
             )
-        else:  # HYBRID (default)
+        else:  # DENSE and HYBRID both use hybrid retrieval for consistent ranking
             return self._retriever.retrieve(
                 query, k=k, lambda_1=l1, lambda_2=l2, user_id=user_id,
             )
@@ -268,10 +266,17 @@ class ReasonerAgent(BaseAgent):
         return self._engine.reason_without_retrieval(query)
 
     def _build_memory_aware_prompt(self, is_recalibration: bool) -> str:
-        """Inject session memory context into the system prompt."""
+        """Inject session memory context into the system prompt.
+
+        Only injects session context during recalibration cycles to ensure
+        deterministic initial responses for the same query.
+        """
         base = RECALIBRATION_PROMPT if is_recalibration else SYSTEM_PROMPT
 
-        # Add session context if available
+        if not is_recalibration:
+            return base
+
+        # Add session context only during recalibration
         session_ctx = self._memory.context_summary()
         if session_ctx:
             return f"{base}\n\nSession context:\n{session_ctx}"

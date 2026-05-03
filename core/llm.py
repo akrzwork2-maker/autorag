@@ -137,8 +137,8 @@ def call_llm(prompt: str, system_prompt: str | None = None) -> LLMResponse:
                     fallback_level=3,
                 )
         except Exception as e:
-            errors.append(f"Groq Gemma2: {e}")
-            logger.warning("Groq Gemma2 failed: %s", e)
+            errors.append(f"Groq GPT-OSS-20B: {e}")
+            logger.warning("Groq GPT-OSS-20B failed: %s", e)
 
     if pref == "auto" and api_keys.has_groq():
         try:
@@ -150,8 +150,8 @@ def call_llm(prompt: str, system_prompt: str | None = None) -> LLMResponse:
                     fallback_level=4,
                 )
         except Exception as e:
-            errors.append(f"Groq Mixtral: {e}")
-            logger.warning("Groq Mixtral failed: %s", e)
+            errors.append(f"Groq Scout: {e}")
+            logger.warning("Groq Scout failed: %s", e)
 
     cached = _check_cache(prompt)
     if cached:

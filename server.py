@@ -20,6 +20,24 @@ HISTORY_DIR = Path("data/history")
 _ANON_USER = "__anon__"
 
 
+def _sanitize_error(raw: str | None) -> str | None:
+    """Convert raw internal errors to user-friendly messages for the UI."""
+    if not raw:
+        return None
+    low = raw.lower()
+    if "all llm backends failed" in low:
+        if "rate_limit" in low or "resource_exhausted" in low or "429" in low or "quota" in low:
+            return "Our AI models are temporarily rate-limited. Please wait a moment and try again."
+        if "no api keys" in low:
+            return "AI service is not configured. Please contact the administrator."
+        return "AI service is temporarily unavailable. Please try again shortly."
+    if "knowledge base is empty" in low:
+        return raw  # already user-friendly
+    if "413" in low or "request too large" in low:
+        return "Your query produced too much context. Try a shorter or simpler question."
+    return "Something went wrong. Please try again."
+
+
 def _history_path(user_id: str) -> Path:
     safe = user_id.replace("/", "_").replace("\\", "_")
     return HISTORY_DIR / f"{safe}.json"
@@ -114,6 +132,13 @@ class SettingsRequest(BaseModel):
     contradicted_threshold: float | None = None
     confidence_threshold: float | None = None
     max_cycles: int | None = None
+    initial_k: int | None = None
+    lambda_1: float | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    alpha: float | None = None
+    beta: float | None = None
+    gamma: float | None = None
 
 class RegisterRequest(BaseModel):
     name: str
@@ -138,7 +163,7 @@ def _result_dict(r):
         "total_sources_used": r.total_sources_used,
         "calibration_cycles": r.calibration_cycles,
         "total_time_ms": round(r.total_time_ms, 1),
-        "error": r.error,
+        "error": _sanitize_error(r.error),
         "trace": [
             {"step_type": s.step_type.value, "cycle": s.cycle,
              "detail": s.detail, "duration_ms": round(s.duration_ms, 1), "data": s.data or {}}
@@ -226,6 +251,15 @@ def get_stats(user=Depends(get_current_user)):
     stats = vs.stats(uid)
     hist_data = _get_user_history(uid)
     query_history = hist_data["history"]
+    # Deduplicate history by query text (keep latest occurrence)
+    seen = set()
+    deduped = []
+    for h in reversed(query_history):
+        key = h.get("query", "").strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(h)
+    deduped.reverse()
     return {
         "kb": stats,
         "queries": len(query_history),
@@ -234,7 +268,9 @@ def get_stats(user=Depends(get_current_user)):
             if query_history else 0
         ),
         "fact_checks": hist_data["fact_checks"],
-        "history": query_history[-20:],
+        "history": deduped[-20:],
+        "verify_history": hist_data.get("verify_history", [])[-20:],
+        "xray_history": hist_data.get("xray_history", [])[-20:],
     }
 
 
@@ -254,7 +290,7 @@ def get_config(user=Depends(get_current_user)):
 
 @app.get("/api/settings")
 def get_settings(user=Depends(get_current_user)):
-    from core.config import api_keys, verifier, calibration
+    from core.config import api_keys, verifier, calibration, retrieval, models
     uid = _uid(user)
     return {
         "preferred_provider": app_settings["preferred_provider"],
@@ -262,6 +298,13 @@ def get_settings(user=Depends(get_current_user)):
         "contradicted_threshold": verifier.contradicted_threshold,
         "confidence_threshold": calibration.confidence_threshold,
         "max_cycles": calibration.max_cycles,
+        "initial_k": retrieval.initial_k,
+        "lambda_1": retrieval.lambda_1,
+        "temperature": models.LLM_TEMPERATURE,
+        "max_tokens": models.LLM_MAX_TOKENS,
+        "alpha": calibration.alpha,
+        "beta": calibration.beta,
+        "gamma": calibration.gamma,
         "available": {
             "gemini": api_keys.has_gemini(),
             "groq": api_keys.has_groq(),
@@ -272,13 +315,11 @@ def get_settings(user=Depends(get_current_user)):
 
 @app.post("/api/settings")
 def update_settings(req: SettingsRequest, user=Depends(get_current_user)):
-    if req.preferred_provider not in ("auto", "gemini", "groq_primary", "groq_fallback"):
-        raise HTTPException(400, "Invalid provider")
     app_settings["preferred_provider"] = req.preferred_provider
     import core.llm as llm_module
     llm_module.preferred_provider = req.preferred_provider
 
-    from core.config import verifier, calibration
+    from core.config import verifier, calibration, retrieval, models
     changes = []
     if req.verified_threshold is not None and 0.5 <= req.verified_threshold <= 0.95:
         verifier.verified_threshold = round(req.verified_threshold, 2)
@@ -292,13 +333,42 @@ def update_settings(req: SettingsRequest, user=Depends(get_current_user)):
     if req.max_cycles is not None and 1 <= req.max_cycles <= 5:
         calibration.max_cycles = req.max_cycles
         changes.append(f"Max calibration cycles → {calibration.max_cycles}")
+    if req.initial_k is not None and 3 <= req.initial_k <= 15:
+        retrieval.initial_k = req.initial_k
+        changes.append(f"Top-K chunks → {retrieval.initial_k}")
+    if req.lambda_1 is not None and 0.1 <= req.lambda_1 <= 1.0:
+        retrieval.lambda_1 = round(req.lambda_1, 2)
+        retrieval.lambda_2 = round(1.0 - retrieval.lambda_1, 2)
+        changes.append(f"Semantic weight λ₁ → {retrieval.lambda_1} (λ₂ = {retrieval.lambda_2})")
+    if req.temperature is not None and 0.0 <= req.temperature <= 1.0:
+        models.LLM_TEMPERATURE = round(req.temperature, 2)
+        changes.append(f"Temperature → {req.temperature:.2f}")
+    if req.max_tokens is not None and 256 <= req.max_tokens <= 4096:
+        models.LLM_MAX_TOKENS = req.max_tokens
+        changes.append(f"Max response tokens → {req.max_tokens}")
+    if req.alpha is not None and req.beta is not None and req.gamma is not None:
+        raw_sum = req.alpha + req.beta + req.gamma
+        if raw_sum > 0:
+            a = round(req.alpha / raw_sum, 2)
+            b = round(req.beta / raw_sum, 2)
+            g = round(1.0 - a - b, 2)
+            calibration.alpha = a
+            calibration.beta = b
+            calibration.gamma = g
+            changes.append(f"Scoring weights → α={a}, β={b}, γ={g}")
 
     return {
-        "preferred_provider": app_settings["preferred_provider"],
         "verified_threshold": verifier.verified_threshold,
         "contradicted_threshold": verifier.contradicted_threshold,
         "confidence_threshold": calibration.confidence_threshold,
         "max_cycles": calibration.max_cycles,
+        "initial_k": retrieval.initial_k,
+        "lambda_1": retrieval.lambda_1,
+        "temperature": models.LLM_TEMPERATURE,
+        "max_tokens": models.LLM_MAX_TOKENS,
+        "alpha": calibration.alpha,
+        "beta": calibration.beta,
+        "gamma": calibration.gamma,
         "changes": changes,
     }
 
@@ -387,7 +457,7 @@ async def verify_stream(text: str, request: Request, token: str | None = None):
 
     uid = (user_payload or {}).get("sub") or _ANON_USER
     import time as _time
-    from core.evaluator import extract_claims, nli_batch_scores, ClaimVerdict
+    from core.evaluator import extract_claims, nli_batch_scores, ClaimVerdict, _normalize_for_nli
     from core.config import verifier
 
     loop = asyncio.get_event_loop()
@@ -435,28 +505,47 @@ async def verify_stream(text: str, request: Request, token: str | None = None):
             step3 = {"step": "Entailment Scoring", "icon": "brain", "time_ms": t_nli,
                       "detail": "Skipped — input is outside knowledge base domain"}
         else:
-            top_chunks = evidence[:3]
+            top_chunks = evidence[:4]
             pairs = []
             pair_map = []
             for ci, claim in enumerate(claims):
                 for chi, chunk in enumerate(top_chunks):
                     ct = chunk.text if hasattr(chunk, 'text') else chunk.get('text', '')
-                    pairs.append((ct[:400], claim))
+                    pairs.append((ct, claim))
                     pair_map.append((ci, chi))
 
             scores = nli_batch_scores(pairs, max_length=512)
 
+            # Embedding fallback: compute claim-chunk cosine similarities
+            from core.embedder import Embedder
+            _emb = Embedder()
+            chunk_texts = [c.get('text', '') if isinstance(c, dict) else c.text for c in top_chunks]
+            claim_vecs = _emb.encode_batch(claims)
+            chunk_vecs = _emb.encode_batch(chunk_texts)
+
             verdicts = []
             for ci, claim in enumerate(claims):
-                best_score = 0.0
+                best_nli = 0.0
                 best_evidence = ''
                 best_source = ''
                 for j, (c_idx, ch_idx) in enumerate(pair_map):
-                    if c_idx == ci and scores[j] > best_score:
-                        best_score = scores[j]
+                    if c_idx == ci and scores[j] > best_nli:
+                        best_nli = scores[j]
                         chunk = top_chunks[ch_idx]
                         best_evidence = (chunk.text if hasattr(chunk, 'text') else chunk.get('text', ''))[:300]
                         best_source = chunk.doc_name if hasattr(chunk, 'doc_name') else chunk.get('metadata', {}).get('doc_name', 'unknown')
+
+                # Embedding fallback when NLI gives no signal (garbled text)
+                import numpy as _np
+                embed_sim = max(
+                    max(0.0, float(_np.dot(claim_vecs[ci], chunk_vecs[k]) / (_np.linalg.norm(claim_vecs[ci]) * _np.linalg.norm(chunk_vecs[k]) + 1e-10)))
+                    for k in range(len(top_chunks))
+                )
+                if best_nli < 0.05:
+                    best_score = max(best_nli, embed_sim * 0.85)
+                else:
+                    best_score = best_nli
+
                 if best_score < verifier.contradicted_threshold:
                     best_evidence = ''
                     best_source = ''
@@ -510,6 +599,10 @@ async def verify_stream(text: str, request: Request, token: str | None = None):
         await future
         hist_data = _get_user_history(uid)
         hist_data["fact_checks"] = hist_data.get("fact_checks", 0) + 1
+        verify_history = hist_data.get("verify_history", [])
+        snippet = text.strip()[:120]
+        verify_history.append({"text": snippet})
+        hist_data["verify_history"] = verify_history[-30:]
         _save_user_history(uid)
         yield "data: [DONE]\n\n"
 
@@ -527,8 +620,15 @@ async def xray(query: str, user=Depends(get_current_user)):
     uid = _uid(user)
     loop = asyncio.get_event_loop()
     q = query.strip()
-    r_full, r_basic, r_llm = await asyncio.gather(
-        loop.run_in_executor(None, lambda: pipeline.run(q, user_id=uid)),
+    # Save xray query to history
+    hist_data = _get_user_history(uid)
+    xray_hist = hist_data.get("xray_history", [])
+    xray_hist.append({"query": q})
+    hist_data["xray_history"] = xray_hist[-30:]
+    _save_user_history(uid)
+    # Run AutoRAG++ first (uses agents + session memory), then baselines in parallel
+    r_full = await loop.run_in_executor(None, lambda: pipeline.run(q, user_id=uid))
+    r_basic, r_llm = await asyncio.gather(
         loop.run_in_executor(None, lambda: pipeline.run_basic_rag(q, user_id=uid)),
         loop.run_in_executor(None, lambda: pipeline.run_llm_only(q)),
     )

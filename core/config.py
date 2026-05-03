@@ -16,7 +16,7 @@ class Paths:
     DEMO_CACHE: Path = _PROJECT_ROOT / "data" / "demo_cache"
 
 
-@dataclass(frozen=True)
+@dataclass
 class Models:
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     EMBEDDING_DIM: int = 384
@@ -27,8 +27,8 @@ class Models:
     GEMINI_MODEL: str = "gemini-2.0-flash"
     GROQ_MODEL_PRIMARY: str = "llama-3.3-70b-versatile"
     GROQ_MODEL_SECONDARY: str = "llama-3.1-8b-instant"
-    GROQ_MODEL_TERTIARY: str = "gemma2-9b-it"
-    GROQ_MODEL_QUATERNARY: str = "mixtral-8x7b-32768"
+    GROQ_MODEL_TERTIARY: str = "openai/gpt-oss-20b"
+    GROQ_MODEL_QUATERNARY: str = "meta-llama/llama-4-scout-17b-16e-instruct"
 
     LLM_TEMPERATURE: float = 0.0
     LLM_MAX_TOKENS: int = 2048
@@ -62,7 +62,7 @@ class RetrievalConfig:
 @dataclass
 class CalibrationConfig:
     confidence_threshold: float = 0.70
-    max_cycles: int = 2
+    max_cycles: int = 4
     k_increment_multiplier: float = 3.0
     lambda_adjust_step: float = 0.05
     kb_admission_threshold: float = 0.85
@@ -86,48 +86,38 @@ class VectorStoreConfig:
 
 
 EXAMPLE_QUERIES = [
-    "What is the transformer architecture and how does self-attention work?",
-    "Explain retrieval-augmented generation and its limitations",
-    "How does RLHF work in training large language models?",
-    "What is a vector database and how does similarity search work?",
+    "What are the top cyber threats identified in the ENISA Threat Landscape 2025?",
+    "How do cybersecurity investment priorities differ across critical infrastructure sectors?",
+    "What role does ransomware play in the current EU threat landscape?",
+    "What are ENISA's key recommendations for critical infrastructure protection?",
 ]
 
-SEED_WIKIPEDIA_TOPICS = [
-    "Transformer (deep learning architecture)",
-    "Retrieval-augmented generation",
-    "Large language model",
-    "BERT (language model)",
-    "Attention (machine learning)",
-    "Vector database",
-    "Natural language processing",
-    "Prompt engineering",
-]
+SEED_WIKIPEDIA_TOPICS: list[str] = []
 
 FACT_CHECK_EXAMPLES = {
     "accurate": (
-        "The Transformer architecture was introduced in the 2017 paper "
-        "'Attention Is All You Need' by Vaswani et al. It relies entirely "
-        "on self-attention mechanisms and does not use recurrence or convolutions. "
-        "The model uses multi-head attention to attend to different representation "
-        "subspaces at different positions."
+        "Ransomware remains one of the most significant cybersecurity threats "
+        "to organizations in the European Union. ENISA identified it as a top "
+        "threat in their 2025 Threat Landscape report, with critical infrastructure "
+        "sectors being particularly targeted."
     ),
     "mixed": (
-        "BERT is a language model developed by OpenAI in 2018. It uses "
-        "bidirectional training of Transformer encoders. BERT was pre-trained "
-        "on BookCorpus and English Wikipedia. The base model has 110 million "
-        "parameters and was the first model to use attention mechanisms."
+        "DDoS attacks and supply chain compromises have been identified as growing "
+        "threats to EU critical infrastructure by ENISA. Law enforcement operations "
+        "successfully disrupted several major ransomware groups in 2024, but the "
+        "overall number of cyberattacks against EU institutions decreased by 50% as a result."
     ),
     "inaccurate": (
-        "GPT-4 is an open-source model with 1 trillion parameters released in 2022. "
-        "It was trained exclusively on Reddit data using supervised learning only. "
-        "GPT-4 does not support multimodal inputs and can only process English text."
+        "Nuclear power plants are the most frequently targeted critical infrastructure "
+        "by cyberattacks, accounting for over 40% of all incidents in 2025. ENISA "
+        "reported that the EU has no cybersecurity regulations for the energy sector."
     ),
 }
 
 XRAY_QUERIES = [
-    "What is CRISPR and how does it work?",
-    "Explain how retrieval-augmented generation reduces hallucinations",
-    "How do modern gene editing techniques compare to traditional methods?",
+    "What specific cybersecurity measures does NIS2 require for energy sector operators?",
+    "How has the ransomware threat evolved for EU critical infrastructure?",
+    "Compare cybersecurity risks facing renewable energy vs nuclear power facilities",
 ]
 
 

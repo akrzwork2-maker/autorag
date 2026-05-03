@@ -129,7 +129,7 @@ class VectorStore:
         retrieved = []
         for i, doc_id in enumerate(results["ids"][0]):
             distance = results["distances"][0][i]
-            similarity = 1.0 - distance
+            similarity = max(0.0, 1.0 - distance)  # clamp: cosine distance in [0,2]
             retrieved.append({
                 "id": doc_id,
                 "text": results["documents"][0][i],

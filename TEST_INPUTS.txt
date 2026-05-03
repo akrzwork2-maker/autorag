@@ -1,0 +1,49 @@
+=========================================
+ VERIFAI TEST INPUTS — CONSOLIDATED
+=========================================
+
+PAGE 1: AutoRAG QA
+-------------------
+1. What are the top cyber threats identified in the ENISA Threat Landscape 2025?
+2. How do the cybersecurity investment priorities differ between critical infrastructure sectors?
+3. What role does ransomware play in the current EU threat landscape?
+4. What are the key recommendations from ENISA for critical infrastructure protection?
+
+
+PAGE 2: Fact Verifier
+---------------------
+SUPPORTED:
+Ransomware remains one of the most significant cybersecurity threats to organizations in the European Union.
+
+SUPPORTED:
+DDoS attacks and supply chain compromises have been identified as growing threats to EU critical infrastructure by ENISA.
+
+CONTRADICTED:
+Nuclear power plants are the most frequently targeted critical infrastructure by cyberattacks, accounting for over 40% of all incidents in 2025.
+
+MIXED:
+Law enforcement operations successfully disrupted several major ransomware groups in 2024, but the overall number of cyberattacks against EU institutions decreased by 50% as a result.
+
+
+PAGE 3: Pipeline X-Ray
+-----------------------
+1. What specific cybersecurity measures does the NIS2 directive require for energy sector operators, and how do these align with the NIST Cybersecurity Framework?
+2. Compare the cybersecurity risks facing renewable energy grid infrastructure with those facing nuclear power facilities, including specific attack vectors, regulatory frameworks like NIS2, and recommended mitigation strategies from NIST CSF 2.0.
+3. How has the ransomware threat evolved for EU critical infrastructure sectors according to ENISA?
+
+
+=========================================
+ MORE
+=========================================
+QA:
+- What are the main supply chain cyber risks identified by ENISA?
+- How do EU cybersecurity regulations address the energy sector?
+- What DDoS attack trends were observed in the ENISA 2025 report?
+
+FACT VERIFIER:
+- ENISA identified ransomware, DDoS, and supply chain attacks as the top three threats facing EU member states in their 2025 threat landscape report. The energy and healthcare sectors were highlighted as particularly vulnerable.
+- The NIS2 directive requires all essential service operators in the EU to implement baseline cybersecurity measures and report significant incidents within 24 hours. It replaced the original NIS directive in 2023.
+
+X-RAY:
+- What role does nuclear energy security play in the broader renewable energy transition risk landscape?
+- How do ENISA threat landscape findings compare across the healthcare, energy, and transport sectors?

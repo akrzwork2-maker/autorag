@@ -44,7 +44,18 @@
     <div class="header-right">
         <button id="theme-toggle" class="icon-btn" title="Toggle light/dark mode"><i data-lucide="moon"></i></button>
         <button class="icon-btn" onclick="navigateTo('settings')" title="Settings"><i data-lucide="settings"></i></button>
-        <div class="header-avatar" title="User"><i data-lucide="circle-user-round"></i></div>
+        <div class="profile-wrap" id="profile-wrap">
+            <div class="header-avatar" id="header-avatar" title="User"><i data-lucide="circle-user-round"></i></div>
+            <div class="profile-dropdown" id="profile-dropdown">
+                <button class="profile-item" id="profile-toggle-btn"><i data-lucide="user"></i> Profile</button>
+                <div class="profile-details" id="profile-details">
+                    <div class="profile-detail-row"><span class="profile-detail-label">Name</span><span class="profile-detail-value" id="profile-name">User</span></div>
+                    <div class="profile-detail-row"><span class="profile-detail-label">Email</span><span class="profile-detail-value" id="profile-email"></span></div>
+                </div>
+                <div class="profile-divider"></div>
+                <button class="profile-item profile-logout" onclick="logout()"><i data-lucide="log-out"></i> Sign out</button>
+            </div>
+        </div>
     </div>
 </header>
 
@@ -132,6 +143,7 @@
 <main id="page-verify" class="page">
     <div class="page-header"><i data-lucide="shield-check"></i><h1>Fact Verifier</h1><span class="badge">Verification Engine</span></div>
     <textarea id="fv-input" rows="5" placeholder="Paste text to verify against the knowledge base..."></textarea>
+    <div id="fv-recent" class="recent-searches"></div>
     <div class="btn-row">
         <button id="fv-btn" class="btn-primary"><i data-lucide="circle-check"></i> Verify</button>
     </div>
@@ -156,7 +168,7 @@
         <input type="text" id="xray-input" placeholder="Enter a query to compare..." autocomplete="off">
         <button id="xray-btn" class="btn-primary"><i data-lucide="git-compare"></i> Compare</button>
     </div>
-    <div id="xray-examples" class="example-chips"></div>
+    <div id="xray-recent" class="recent-searches"></div>
     <div id="xray-progress" style="display:none">
         <div class="progress-bar"><div class="progress-fill xray-animate" id="xray-pbar"></div></div>
         <div class="caption" id="xray-ptext">Running...</div>
@@ -222,20 +234,6 @@
     <div class="page-header"><i data-lucide="settings"></i><h1>Settings</h1></div>
 
     <div class="card">
-        <h3><i data-lucide="cpu"></i> LLM Provider</h3>
-        <p class="caption" style="margin-bottom:1rem">Select the preferred language model for all pipeline operations.</p>
-        <div class="settings-field">
-            <label for="settings-provider">Preferred Provider</label>
-            <select id="settings-provider">
-                <option value="auto">Auto — Best Available (5-model fallback)</option>
-                <option value="gemini">Gemini 2.0 Flash (1500 RPD)</option>
-                <option value="groq_primary">Groq Llama 3.3 70B</option>
-                <option value="groq_fallback">Groq Llama 3.1 8B</option>
-            </select>
-        </div>
-    </div>
-
-    <div class="card">
         <h3><i data-lucide="shield-check"></i> NLI Verification Thresholds</h3>
         <p class="caption" style="margin-bottom:1rem">Controls the Fact Verifier verdicts and the Evaluator Agent's F<sub>c</sub> scoring. Based on DeBERTa entailment probabilities.</p>
         <div class="settings-field">
@@ -263,6 +261,54 @@
             <input type="range" id="sv-cycles" min="1" max="5" step="1" value="2" class="setting-slider accent-slider">
             <p class="setting-hint">Maximum re-retrieval iterations before returning best result</p>
         </div>
+    </div>
+
+    <div class="card">
+        <h3><i data-lucide="database"></i> Retrieval Configuration</h3>
+        <p class="caption" style="margin-bottom:1rem">Tunes the Retriever Agent's chunk selection strategy. λ₁ controls semantic weight, λ₂ = 1 − λ₁ controls keyword weight in hybrid scoring.</p>
+        <div class="settings-field">
+            <label>Top-K Chunks <span class="setting-val" id="sv-topk-val">5</span></label>
+            <input type="range" id="sv-topk" min="3" max="15" step="1" value="5" class="setting-slider accent-slider">
+            <p class="setting-hint">Number of chunks retrieved per query. Higher = more context but slower</p>
+        </div>
+        <div class="settings-field">
+            <label>Semantic Weight λ₁ <span class="setting-val" id="sv-lambda1-val">0.70</span></label>
+            <input type="range" id="sv-lambda1" min="0.10" max="1.00" step="0.05" value="0.70" class="setting-slider accent-slider">
+            <p class="setting-hint">Blend ratio — higher values favour dense (embedding) similarity over BM25 keyword matching</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3><i data-lucide="brain"></i> Generation Parameters</h3>
+        <p class="caption" style="margin-bottom:1rem">Controls the Reasoner Agent's LLM generation behaviour.</p>
+        <div class="settings-field">
+            <label>Temperature <span class="setting-val" id="sv-temperature-val">0.00</span></label>
+            <input type="range" id="sv-temperature" min="0.00" max="1.00" step="0.05" value="0.00" class="setting-slider accent-slider">
+            <p class="setting-hint">0 = deterministic, higher = more creative. Recommended ≤ 0.3 for factual RAG</p>
+        </div>
+        <div class="settings-field">
+            <label>Max Response Tokens <span class="setting-val" id="sv-maxtokens-val">2048</span></label>
+            <input type="range" id="sv-maxtokens" min="256" max="4096" step="256" value="2048" class="setting-slider accent-slider">
+            <p class="setting-hint">Maximum tokens for LLM-generated answers</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3><i data-lucide="target"></i> Confidence Scoring Weights</h3>
+        <p class="caption" style="margin-bottom:1rem">Weights for the composite confidence formula C<sub>f</sub> = α·S<sub>c</sub> + β·F<sub>c</sub> + γ·R<sub>c</sub> used by the Evaluator Agent (Paper Eq. 2).</p>
+        <div class="settings-field">
+            <label>α — Semantic Score Weight <span class="setting-val" id="sv-alpha-val">0.40</span></label>
+            <input type="range" id="sv-alpha" min="0.10" max="0.80" step="0.05" value="0.40" class="setting-slider accent-slider">
+        </div>
+        <div class="settings-field">
+            <label>β — Factual Score Weight <span class="setting-val" id="sv-beta-val">0.30</span></label>
+            <input type="range" id="sv-beta" min="0.10" max="0.80" step="0.05" value="0.30" class="setting-slider accent-slider">
+        </div>
+        <div class="settings-field">
+            <label>γ — Retrieval Score Weight <span class="setting-val" id="sv-gamma-val">0.30</span></label>
+            <input type="range" id="sv-gamma" min="0.10" max="0.80" step="0.05" value="0.30" class="setting-slider accent-slider">
+        </div>
+        <p class="setting-hint">α + β + γ should equal 1.0. Values will be auto-normalised on save.</p>
     </div>
 
     <div class="card">

@@ -12,6 +12,19 @@ from core.retriever import Retriever, RetrievalResult
 from core.reasoner import Reasoner, ReasonerResult
 from core.evaluator import Evaluator, EvaluationResult
 from core.calibrator import Calibrator, CalibrationStep
+from core.memory import (
+    AgentMessage,
+    SessionMemory,
+    MessageType,
+    QueryRecord,
+    RetrievalStrategy,
+)
+from core.agents import (
+    RetrieverAgent,
+    ReasonerAgent,
+    EvaluatorAgent,
+    compute_calibration_step,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +72,13 @@ class PipelineResult:
 
 
 class Pipeline:
+    """AutoRAG++ Orchestrator — coordinates three autonomous agents.
+
+    The Retriever, Reasoner, and Evaluator agents share session-level
+    memory (M_t) and negotiate through an asynchronous message protocol.
+    The orchestrator drives the closed-loop: Retrieve → Reason → Evaluate
+    → (Calibrate → Retrieve → Reason → Evaluate)* → Done.
+    """
 
     def __init__(
         self,
@@ -68,7 +88,7 @@ class Pipeline:
         reasoner: Reasoner | None = None,
         evaluator: Evaluator | None = None,
         calibrator: Calibrator | None = None,
-        wiki_fetcher=None,   # utils.wiki.WikiFetcher — injected in Step 5
+        wiki_fetcher=None,
     ):
         self._embedder = embedder or Embedder()
         self._vectorstore = vectorstore or VectorStore(self._embedder)
@@ -78,10 +98,31 @@ class Pipeline:
         self._calibrator = calibrator or Calibrator()
         self._wiki_fetcher = wiki_fetcher
 
+        # Session memory persists across queries within the same Pipeline instance
+        self._memory = SessionMemory()
+
+        # Agents — each receives a reference to the shared memory
+        self._retriever_agent = RetrieverAgent(
+            self._memory, self._retriever, self._embedder, self._vectorstore,
+        )
+        self._reasoner_agent = ReasonerAgent(self._memory, self._reasoner)
+        self._evaluator_agent = EvaluatorAgent(self._memory, self._evaluator)
+
+    @property
+    def session_memory(self) -> SessionMemory:
+        return self._memory
+
     def run(self, query: str, on_step=None, user_id: str | None = None) -> PipelineResult:
+        """Run the full AutoRAG++ agentic pipeline.
+
+        Algorithm 1 from the paper: agents coordinate through M_t.
+        """
         start = time.time()
         trace: list[PipelineStep] = []
         cal_steps: list[CalibrationStep] = []
+
+        # Begin new query — clears per-query messages, keeps history
+        self._memory.begin_query()
 
         if self._vectorstore.count(user_id) == 0:
             return PipelineResult(
@@ -100,6 +141,7 @@ class Pipeline:
             if on_step:
                 on_step(step)
 
+        # ── Step 1: Encode ──
         t0 = time.time()
         query_emb = self._embedder.encode(query)
         _emit(PipelineStep(
@@ -110,15 +152,18 @@ class Pipeline:
             data={"embedding_dim": len(query_emb)},
         ))
 
-
+        # ── Step 2: Retriever Agent — autonomous strategy selection + retrieval ──
         t0 = time.time()
-        ret_result = self._retriever.retrieve(query, k=current_k, lambda_1=current_l1, lambda_2=current_l2, user_id=user_id)
+        strategy, ret_result = self._retriever_agent.analyze_and_decide(
+            query, k=current_k, lambda_1=current_l1, lambda_2=current_l2, user_id=user_id,
+        )
         _emit(PipelineStep(
             step_type=StepType.RETRIEVE,
             cycle=0,
-            detail=f"Retrieved {len(ret_result.chunks)} chunks (k={current_k}, λ₁={current_l1})",
+            detail=f"[{strategy.value}] Retrieved {len(ret_result.chunks)} chunks (k={current_k}, λ₁={current_l1})",
             duration_ms=round((time.time() - t0) * 1000, 1),
             data={
+                "strategy": strategy.value,
                 "k": current_k,
                 "lambda_1": current_l1,
                 "candidates": ret_result.candidates_fetched,
@@ -127,9 +172,9 @@ class Pipeline:
             },
         ))
 
-
+        # ── Step 3: Reasoner Agent — memory-aware generation ──
         t0 = time.time()
-        reason_result = self._reasoner.reason(query, ret_result.chunks)
+        reason_result = self._reasoner_agent.generate(query, ret_result.chunks)
         _emit(PipelineStep(
             step_type=StepType.REASON,
             cycle=0,
@@ -141,8 +186,9 @@ class Pipeline:
         if reason_result.error:
             return self._build_error_result(query, reason_result, trace, start)
 
+        # ── Step 4: Evaluator Agent — evaluate + post feedback to memory ──
         t0 = time.time()
-        eval_result = self._evaluator.evaluate(reason_result.answer, ret_result.chunks)
+        eval_result = self._evaluator_agent.evaluate(reason_result.answer, ret_result.chunks)
         _emit(PipelineStep(
             step_type=StepType.EVALUATE,
             cycle=0,
@@ -157,18 +203,38 @@ class Pipeline:
             },
         ))
 
-
+        # ── Step 5: Calibration loop — agents negotiate through M_t ──
         cycle = 0
-        while self._calibrator.should_calibrate(eval_result) and cycle < calibration.max_cycles:
+        while self._evaluator_agent.should_calibrate(eval_result) and cycle < calibration.max_cycles:
             cycle += 1
+            self._memory.current_cycle = cycle
 
+            # Evaluator's feedback message is already in memory from evaluate()
+            feedback = self._memory.last_message(MessageType.EVALUATION_FEEDBACK)
+
+            # Calibrate using evaluator feedback
             t0 = time.time()
-            cal_step = self._calibrator.adjust_parameters(
-                eval_result, current_k, current_l1, current_l2, cycle
+            cal_step = compute_calibration_step(
+                eval_result, feedback, current_k, current_l1, current_l2, cycle,
             )
             current_k = cal_step.k_after
             current_l1 = cal_step.lambda_1_after
             current_l2 = cal_step.lambda_2_after
+
+            # Post calibration action to memory
+            self._memory.post(AgentMessage(
+                from_agent="orchestrator",
+                to_agent="all",
+                msg_type=MessageType.CALIBRATION_ACTION,
+                payload={
+                    "cycle": cycle,
+                    "k": current_k,
+                    "lambda_1": current_l1,
+                    "lambda_2": current_l2,
+                    "directive": feedback.payload.get("directive", "") if feedback else "",
+                },
+            ))
+
             _emit(PipelineStep(
                 step_type=StepType.CALIBRATE,
                 cycle=cycle,
@@ -181,7 +247,7 @@ class Pipeline:
                 },
             ))
 
-
+            # Dynamic Knowledge Update — fetch new sources
             if self._wiki_fetcher:
                 t0 = time.time()
                 try:
@@ -204,8 +270,11 @@ class Pipeline:
                 except Exception as e:
                     logger.warning("Wiki fetch failed in cycle %d: %s", cycle, e)
 
+            # Retriever Agent re-retrieves with calibrated parameters
             t0 = time.time()
-            ret_result = self._retriever.retrieve(query, k=current_k, lambda_1=current_l1, lambda_2=current_l2, user_id=user_id)
+            ret_result = self._retriever_agent.re_retrieve(
+                query, current_k, current_l1, current_l2, user_id=user_id,
+            )
             _emit(PipelineStep(
                 step_type=StepType.RETRIEVE,
                 cycle=cycle,
@@ -214,10 +283,11 @@ class Pipeline:
                 data={"k": current_k, "returned": len(ret_result.chunks)},
             ))
 
-
+            # Reasoner Agent re-generates (is_recalibration=True for adjusted prompt)
             t0 = time.time()
-            from core.reasoner import RECALIBRATION_PROMPT
-            reason_result = self._reasoner.reason(query, ret_result.chunks, system_prompt=RECALIBRATION_PROMPT)
+            reason_result = self._reasoner_agent.generate(
+                query, ret_result.chunks, is_recalibration=True,
+            )
             _emit(PipelineStep(
                 step_type=StepType.REASON,
                 cycle=cycle,
@@ -229,8 +299,9 @@ class Pipeline:
             if reason_result.error:
                 return self._build_error_result(query, reason_result, trace, start)
 
+            # Evaluator Agent re-evaluates and posts new feedback
             t0 = time.time()
-            eval_result = self._evaluator.evaluate(reason_result.answer, ret_result.chunks)
+            eval_result = self._evaluator_agent.evaluate(reason_result.answer, ret_result.chunks)
             cal_step.confidence_after = eval_result.confidence
             cal_steps.append(cal_step)
             _emit(PipelineStep(
@@ -246,7 +317,7 @@ class Pipeline:
                 },
             ))
 
-
+        # ── Done ──
         _emit(PipelineStep(
             step_type=StepType.DONE,
             cycle=cycle,
@@ -265,6 +336,17 @@ class Pipeline:
             for c in ret_result.chunks
         ]
 
+        # ── Update session memory: M_{t+1} = UpdateMemory(M_t, Q_t, R_t, C_f) ──
+        self._memory.record_query(QueryRecord(
+            query=query,
+            confidence=eval_result.confidence,
+            s_c=eval_result.semantic_consistency,
+            f_c=eval_result.factual_correctness,
+            strategy_used=strategy,
+            calibration_cycles=cycle,
+            model_used=reason_result.model_used,
+        ))
+
         return PipelineResult(
             query=query,
             answer=reason_result.answer,
@@ -282,6 +364,11 @@ class Pipeline:
         )
 
     def run_basic_rag(self, query: str, user_id: str | None = None) -> PipelineResult:
+        """Single-pass retrieval (cosine only), no calibration — for X-Ray comparison.
+
+        Uses raw engines directly (no agents) to avoid polluting session memory
+        and to provide a clean baseline comparison.
+        """
         start = time.time()
 
         ret_result = self._retriever.retrieve_basic(query, user_id=user_id)
@@ -318,6 +405,10 @@ class Pipeline:
         )
 
     def run_llm_only(self, query: str) -> PipelineResult:
+        """LLM-only mode — no retrieval — for X-Ray comparison.
+
+        Uses raw engine directly (no agents) for clean baseline.
+        """
         start = time.time()
 
         reason_result = self._reasoner.reason_without_retrieval(query)

@@ -37,20 +37,30 @@ class ReasonerResult:
     error: str | None = None
 
 
-def _build_context_block(chunks: list[RetrievedChunk]) -> str:
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token for English text."""
+    return len(text) // 4
+
+
+def _build_context_block(chunks: list[RetrievedChunk], max_tokens: int = 3000) -> str:
     if not chunks:
         return "No sources available."
 
     lines = []
+    used = 0
     for i, chunk in enumerate(chunks, 1):
-        lines.append(f"[Source {i}] (from: {chunk.doc_name}, score: {chunk.hybrid_score})")
-        lines.append(chunk.text)
-        lines.append("")
+        header = f"[Source {i}] (from: {chunk.doc_name}, score: {chunk.hybrid_score})"
+        entry = f"{header}\n{chunk.text}\n"
+        entry_tokens = _estimate_tokens(entry)
+        if used + entry_tokens > max_tokens and lines:
+            break
+        lines.append(entry)
+        used += entry_tokens
     return "\n".join(lines)
 
 
-def _build_prompt(query: str, chunks: list[RetrievedChunk]) -> str:
-    context = _build_context_block(chunks)
+def _build_prompt(query: str, chunks: list[RetrievedChunk], max_context_tokens: int = 3000) -> str:
+    context = _build_context_block(chunks, max_tokens=max_context_tokens)
     return f"""Answer the following question using the provided sources.
 
 SOURCES:

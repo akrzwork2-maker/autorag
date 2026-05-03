@@ -250,7 +250,14 @@ async function loadDashboard() {
             });
 
             show('#dash-recent-card');
-            $('#dash-recent-list').innerHTML = hist.slice().reverse().slice(0, 10).map(h => {
+            const dashSeen = new Set();
+            const dashRecent = hist.slice().reverse().filter(h => {
+                const key = h.query.trim().toLowerCase();
+                if (dashSeen.has(key)) return false;
+                dashSeen.add(key);
+                return true;
+            }).slice(0, 10);
+            $('#dash-recent-list').innerHTML = dashRecent.map(h => {
                 const confCls = h.confidence >= 0.7 ? 'color:var(--green)' : h.confidence >= 0.5 ? 'color:var(--yellow)' : 'color:var(--red)';
                 const truncQ = h.query.length > 70 ? h.query.substring(0, 70) + '...' : h.query;
                 return `<div class="dash-query-item">
@@ -276,7 +283,13 @@ function loadRecentSearches() {
         const hist = data.history || [];
         const el = $('#qa-recent');
         if (!el || hist.length === 0) { if (el) el.innerHTML = ''; return; }
-        const recent = hist.slice().reverse().slice(0, 6);
+        const seen = new Set();
+        const recent = hist.slice().reverse().filter(h => {
+            const key = h.query.trim().toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        }).slice(0, 6);
         el.innerHTML = '<span style="font-size:.72rem;color:var(--text-muted);margin-right:.25rem">Recent:</span>' +
             recent.map(h => {
                 const q = h.query;
@@ -436,15 +449,53 @@ function renderQAResult(r) {
     if (r.error) {
         $('#qa-score').innerHTML = '';
         $('#qa-metrics').innerHTML = '';
-        $('#qa-answer').innerHTML = `<span style="color:var(--red)">${r.error}</span>`;
+        $('#qa-answer').innerHTML = `<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:8px;padding:1rem 1.2rem;display:flex;align-items:center;gap:.75rem"><i data-lucide="alert-circle" style="color:var(--red);flex-shrink:0;width:20px;height:20px"></i><span style="color:var(--red);font-size:.95rem">${r.error}</span></div>`;
         $('#qa-model-info').textContent = '';
         hide('#qa-sources-wrap');
+        if (typeof lucide !== 'undefined') lucide.createIcons();
         return;
     }
 
     const warning = r.confidence < 0.7
         ? `<div class="low-conf-warning"><i data-lucide="alert-triangle"></i> Low confidence — this answer may not be fully supported by the available knowledge base.</div>`
         : '';
+
+    // Build calibration improvement banner if cycles > 0
+    let calBanner = '';
+    if (r.calibration_cycles > 0 && r.trace && r.trace.length > 0) {
+        const evals = r.trace.filter(s => s.step_type === 'evaluate' && s.data && s.data.c_f !== undefined);
+        if (evals.length >= 2) {
+            const first = evals[0].data;
+            const last = evals[evals.length - 1].data;
+            const cDiff = last.c_f - first.c_f;
+            const sDiff = last.s_c - first.s_c;
+            const fDiff = last.f_c - first.f_c;
+            const fmt = (v) => (v > 0 ? '+' : '') + v.toFixed(3);
+            const clr = (v) => v > 0 ? 'var(--green)' : v < 0 ? 'var(--red)' : 'var(--text-dim)';
+            calBanner = `
+                <div style="background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:.85rem 1.1rem;margin-bottom:.75rem;animation:trust-pop .35s ease">
+                    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem">
+                        <i data-lucide="trending-up" style="color:var(--green);width:18px;height:18px"></i>
+                        <span style="font-weight:600;font-size:.88rem;color:var(--text)">Calibration Improvement · ${r.calibration_cycles} cycle${r.calibration_cycles > 1 ? 's' : ''}</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:.6rem;align-items:center">
+                        <div style="text-align:center">
+                            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;margin-bottom:.3rem">Initial</div>
+                            <div style="font-family:var(--mono);font-size:.78rem;color:var(--text-dim)">S<sub>c</sub> ${first.s_c.toFixed(3)}</div>
+                            <div style="font-family:var(--mono);font-size:.78rem;color:var(--text-dim)">F<sub>c</sub> ${first.f_c.toFixed(3)}</div>
+                            <div style="font-family:var(--mono);font-size:.85rem;font-weight:700;color:var(--text)">C<sub>f</sub> ${first.c_f.toFixed(3)}</div>
+                        </div>
+                        <div style="font-size:1.2rem;font-weight:700;color:var(--accent)">→</div>
+                        <div style="text-align:center">
+                            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;margin-bottom:.3rem">Final</div>
+                            <div style="font-family:var(--mono);font-size:.78rem"><span style="color:${clr(sDiff)}">S<sub>c</sub> ${last.s_c.toFixed(3)} (${fmt(sDiff)})</span></div>
+                            <div style="font-family:var(--mono);font-size:.78rem"><span style="color:${clr(fDiff)}">F<sub>c</sub> ${last.f_c.toFixed(3)} (${fmt(fDiff)})</span></div>
+                            <div style="font-family:var(--mono);font-size:.85rem;font-weight:700"><span style="color:${clr(cDiff)}">C<sub>f</sub> ${last.c_f.toFixed(3)} (${fmt(cDiff)})</span></div>
+                        </div>
+                    </div>
+                </div>`;
+        }
+    }
 
     $('#qa-score').innerHTML = `<strong>Answer</strong> ${confBadge(r.confidence)}`;
 
@@ -455,10 +506,10 @@ function renderQAResult(r) {
         metricCard('Total Time', formatTime(r.total_time_ms)),
     ].join('');
 
-    $('#qa-answer').innerHTML = warning + r.answer;
+    $('#qa-answer').innerHTML = calBanner + warning + r.answer;
     $('#qa-model-info').textContent = `${r.total_sources_used} sources · ${r.calibration_cycles} calibration cycle(s)`;
 
-    if (r.confidence < 0.7 && window.lucide) lucide.createIcons();
+    if ((r.confidence < 0.7 || r.calibration_cycles > 0) && window.lucide) lucide.createIcons();
 
     if (r.sources && r.sources.length > 0) {
         show('#qa-sources-wrap');
@@ -473,6 +524,33 @@ function renderQAResult(r) {
     } else {
         hide('#qa-sources-wrap');
     }
+}
+
+function loadRecentVerifications() {
+    authFetch('/api/stats').then(r => r.json()).then(data => {
+        const hist = data.verify_history || [];
+        const el = $('#fv-recent');
+        if (!el || hist.length === 0) { if (el) el.innerHTML = ''; return; }
+        const seen = new Set();
+        const recent = hist.slice().reverse().filter(h => {
+            const key = h.text.trim().toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        }).slice(0, 6);
+        el.innerHTML = '<span style="font-size:.72rem;color:var(--text-muted);margin-right:.25rem">Recent:</span>' +
+            recent.map(h => {
+                const t = h.text;
+                const display = t.length > 40 ? t.substring(0, 40) + '...' : t;
+                return `<span class="recent-chip" data-text="${t.replace(/"/g, '&quot;')}" title="${t.replace(/"/g, '&quot;')}"><i data-lucide="clock"></i>${display}</span>`;
+            }).join('');
+        $$('#fv-recent .recent-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                $('#fv-input').value = chip.dataset.text;
+            });
+        });
+        if (window.lucide) lucide.createIcons();
+    }).catch(() => {});
 }
 
 $('#fv-btn').addEventListener('click', runVerify);
@@ -559,6 +637,7 @@ async function runVerify() {
                 }));
                 renderVerifyResults(finalData);
                 show('#fv-output');
+                loadRecentVerifications();
                 es.close();
             } else if (msg.type === 'error') {
                 $('#fv-pipeline').innerHTML = '';
@@ -803,6 +882,34 @@ function renderVerifyResults(data) {
     if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
+function loadRecentXray() {
+    authFetch('/api/stats').then(r => r.json()).then(data => {
+        const hist = data.xray_history || [];
+        const el = $('#xray-recent');
+        if (!el || hist.length === 0) { if (el) el.innerHTML = ''; return; }
+        const seen = new Set();
+        const recent = hist.slice().reverse().filter(h => {
+            const key = h.query.trim().toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        }).slice(0, 6);
+        el.innerHTML = '<span style="font-size:.72rem;color:var(--text-muted);margin-right:.25rem">Recent:</span>' +
+            recent.map(h => {
+                const q = h.query;
+                const display = q.length > 40 ? q.substring(0, 40) + '...' : q;
+                return `<span class="recent-chip" data-query="${q.replace(/"/g, '&quot;')}" title="${q.replace(/"/g, '&quot;')}"><i data-lucide="clock"></i>${display}</span>`;
+            }).join('');
+        $$('#xray-recent .recent-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                $('#xray-input').value = chip.dataset.query;
+                runXRay();
+            });
+        });
+        if (window.lucide) lucide.createIcons();
+    }).catch(() => {});
+}
+
 $('#xray-btn').addEventListener('click', runXRay);
 $('#xray-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') runXRay(); });
 
@@ -831,6 +938,7 @@ async function runXRay() {
         hide('#xray-progress');
         renderXRay(data);
         show('#xray-output');
+        loadRecentXray();
     } catch (e) {
         timers.forEach(clearTimeout);
         hide('#xray-progress');
@@ -891,7 +999,7 @@ function renderXRay(data) {
                     ${metricCard('Time', formatTime(r.total_time_ms))}
                     ${metricCard('Cycles', r.calibration_cycles)}
                 </div>
-                <div class="answer-box">${r.error ? `<span style="color:var(--red)">${r.error}</span>` : r.answer}</div>
+                <div class="answer-box">${r.error ? `<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:8px;padding:.75rem 1rem;display:flex;align-items:center;gap:.6rem"><i data-lucide="alert-circle" style="color:var(--red);flex-shrink:0;width:16px;height:16px"></i><span style="color:var(--red);font-size:.85rem">${r.error}</span></div>` : r.answer}</div>
             </div>
         `;
     }).join('');
@@ -1107,6 +1215,13 @@ function initSettingsSliders() {
         { id: 'sv-contradicted', valId: 'sv-contradicted-val', fmt: v => parseFloat(v).toFixed(2) },
         { id: 'sv-confidence', valId: 'sv-confidence-val', fmt: v => parseFloat(v).toFixed(2) },
         { id: 'sv-cycles', valId: 'sv-cycles-val', fmt: v => v },
+        { id: 'sv-topk', valId: 'sv-topk-val', fmt: v => v },
+        { id: 'sv-lambda1', valId: 'sv-lambda1-val', fmt: v => parseFloat(v).toFixed(2) },
+        { id: 'sv-temperature', valId: 'sv-temperature-val', fmt: v => parseFloat(v).toFixed(2) },
+        { id: 'sv-maxtokens', valId: 'sv-maxtokens-val', fmt: v => v },
+        { id: 'sv-alpha', valId: 'sv-alpha-val', fmt: v => parseFloat(v).toFixed(2) },
+        { id: 'sv-beta', valId: 'sv-beta-val', fmt: v => parseFloat(v).toFixed(2) },
+        { id: 'sv-gamma', valId: 'sv-gamma-val', fmt: v => parseFloat(v).toFixed(2) },
     ];
     sliders.forEach(s => {
         const el = document.getElementById(s.id);
@@ -1122,7 +1237,6 @@ async function loadSettings() {
     try {
         const res = await authFetch('/api/settings');
         const data = await res.json();
-        $('#settings-provider').value = data.preferred_provider || 'auto';
 
         if (data.verified_threshold != null) {
             $('#sv-verified').value = data.verified_threshold;
@@ -1140,13 +1254,41 @@ async function loadSettings() {
             $('#sv-cycles').value = data.max_cycles;
             $('#sv-cycles-val').textContent = data.max_cycles;
         }
+        if (data.initial_k != null) {
+            $('#sv-topk').value = data.initial_k;
+            $('#sv-topk-val').textContent = data.initial_k;
+        }
+        if (data.lambda_1 != null) {
+            $('#sv-lambda1').value = data.lambda_1;
+            $('#sv-lambda1-val').textContent = data.lambda_1.toFixed(2);
+        }
+        if (data.temperature != null) {
+            $('#sv-temperature').value = data.temperature;
+            $('#sv-temperature-val').textContent = data.temperature.toFixed(2);
+        }
+        if (data.max_tokens != null) {
+            $('#sv-maxtokens').value = data.max_tokens;
+            $('#sv-maxtokens-val').textContent = data.max_tokens;
+        }
+        if (data.alpha != null) {
+            $('#sv-alpha').value = data.alpha;
+            $('#sv-alpha-val').textContent = data.alpha.toFixed(2);
+        }
+        if (data.beta != null) {
+            $('#sv-beta').value = data.beta;
+            $('#sv-beta-val').textContent = data.beta.toFixed(2);
+        }
+        if (data.gamma != null) {
+            $('#sv-gamma').value = data.gamma;
+            $('#sv-gamma-val').textContent = data.gamma.toFixed(2);
+        }
 
         const avail = data.available || {};
         $('#settings-metrics').innerHTML = [
-            metricCard('Gemini', avail.gemini ? '<span style="color:var(--green)">✓ Ready</span>' : '<span style="color:var(--red)">✗ No Key</span>'),
-            metricCard('Groq', avail.groq ? '<span style="color:var(--green)">✓ Ready</span>' : '<span style="color:var(--red)">✗ No Key</span>'),
+            metricCard('LLM Backends', (avail.gemini ? 1 : 0) + (avail.groq ? 1 : 0) + '/2'),
             metricCard('KB Chunks', avail.kb_chunks || 0),
-            metricCard('Verification', 'Entailment Engine'),
+            metricCard('Embedder', '384-dim MiniLM'),
+            metricCard('Verification', 'DeBERTa NLI'),
         ].join('');
     } catch (e) {
         console.error('Settings load failed:', e);
@@ -1155,11 +1297,17 @@ async function loadSettings() {
 
 $('#settings-save').addEventListener('click', async () => {
     const payload = {
-        preferred_provider: $('#settings-provider').value,
         verified_threshold: parseFloat($('#sv-verified').value),
         contradicted_threshold: parseFloat($('#sv-contradicted').value),
         confidence_threshold: parseFloat($('#sv-confidence').value),
         max_cycles: parseInt($('#sv-cycles').value),
+        initial_k: parseInt($('#sv-topk').value),
+        lambda_1: parseFloat($('#sv-lambda1').value),
+        temperature: parseFloat($('#sv-temperature').value),
+        max_tokens: parseInt($('#sv-maxtokens').value),
+        alpha: parseFloat($('#sv-alpha').value),
+        beta: parseFloat($('#sv-beta').value),
+        gamma: parseFloat($('#sv-gamma').value),
     };
     try {
         const res = await authFetch('/api/settings', {
@@ -1214,13 +1362,44 @@ async function init() {
 
     const user = getUser();
     if (user && user.name) {
-        const avatar = $('.header-avatar');
+        const avatar = $('#header-avatar');
+        const profileName = $('#profile-name');
+        const profileEmail = $('#profile-email');
+        const initial = user.name.charAt(0).toUpperCase();
+
         if (avatar) {
             avatar.title = user.name;
-            avatar.innerHTML = `<span style="font-size:.8rem;font-weight:600">${user.name.charAt(0).toUpperCase()}</span>`;
-            avatar.style.cursor = 'pointer';
-            avatar.addEventListener('click', () => {
-                if (confirm('Sign out?')) logout();
+            avatar.innerHTML = `<span style="font-size:.8rem;font-weight:600">${initial}</span>`;
+        }
+        if (profileName) profileName.textContent = user.name;
+        if (profileEmail) profileEmail.textContent = user.email || '';
+
+        // Toggle profile dropdown
+        const wrap = $('#profile-wrap');
+        const dropdown = $('#profile-dropdown');
+        if (avatar && dropdown) {
+            avatar.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const wasOpen = dropdown.classList.contains('open');
+                dropdown.classList.toggle('open');
+                if (!wasOpen && window.lucide) lucide.createIcons();
+            });
+            document.addEventListener('click', (e) => {
+                if (wrap && !wrap.contains(e.target)) {
+                    dropdown.classList.remove('open');
+                    const details = $('#profile-details');
+                    if (details) details.classList.remove('open');
+                }
+            });
+        }
+
+        // Profile expand/collapse
+        const profileBtn = $('#profile-toggle-btn');
+        const profileDetails = $('#profile-details');
+        if (profileBtn && profileDetails) {
+            profileBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                profileDetails.classList.toggle('open');
             });
         }
     }
@@ -1230,18 +1409,8 @@ async function init() {
         appConfig = await res.json();
 
         loadRecentSearches();
-
-        if (appConfig.xray_examples) {
-            $('#xray-examples').innerHTML = appConfig.xray_examples.map(q =>
-                `<span class="example-chip" data-query="${q.replace(/"/g, '&quot;')}">${q.length > 45 ? q.substring(0, 45) + '...' : q}</span>`
-            ).join('');
-            $$('#xray-examples .example-chip').forEach(chip => {
-                chip.addEventListener('click', () => {
-                    $('#xray-input').value = chip.dataset.query;
-                    runXRay();
-                });
-            });
-        }
+        loadRecentVerifications();
+        loadRecentXray();
     } catch (e) {
         console.error('Config load failed:', e);
     }

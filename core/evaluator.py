@@ -15,6 +15,29 @@ from core.retriever import RetrievedChunk
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Text normalization for NLI — fixes garbled web-scraped chunks
+# ---------------------------------------------------------------------------
+
+def _normalize_for_nli(text: str) -> str:
+    """Fix concatenated words from web scraping before sending to NLI.
+
+    Handles patterns like 'ENISAThreatLandscape' → 'ENISA Threat Landscape'
+    and 'Whatarethetopcybersecurity' → keeps as-is (needs wordpiece, fallback
+    handles this via embedding scoring).
+    """
+    # Insert space before uppercase letter preceded by lowercase
+    text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
+    # Insert space between letter and digit transitions
+    text = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', text)
+    text = re.sub(r'(\d)([a-zA-Z])', r'\1 \2', text)
+    # Insert space before opening paren/bracket if preceded by alnum
+    text = re.sub(r'([a-zA-Z0-9])([(\[])', r'\1 \2', text)
+    # Collapse multiple spaces
+    text = re.sub(r' {2,}', ' ', text)
+    return text.strip()
+
+
 @dataclass
 class ClaimVerdict:
     claim: str
@@ -50,6 +73,7 @@ def _load_nli():
 def nli_entailment_score(premise: str, hypothesis: str) -> float:
     try:
         tokenizer, model = _load_nli()
+        premise = _normalize_for_nli(premise)
         inputs = tokenizer(
             premise, hypothesis,
             return_tensors="pt",
@@ -74,8 +98,10 @@ def nli_batch_scores(pairs: list[tuple[str, str]], max_length: int = 512) -> lis
         return []
     try:
         tokenizer, model = _load_nli()
+        premises = [_normalize_for_nli(p[0]) for p in pairs]
+        hypotheses = [p[1] for p in pairs]
         inputs = tokenizer(
-            [p[0] for p in pairs], [p[1] for p in pairs],
+            premises, hypotheses,
             return_tensors="pt", truncation=True, max_length=max_length, padding=True,
         )
         with torch.no_grad():
@@ -90,11 +116,23 @@ def nli_batch_scores(pairs: list[tuple[str, str]], max_length: int = 512) -> lis
 
 
 def extract_claims(text: str) -> list[str]:
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    # Strip markdown formatting: **bold**, *italic*, numbered lists, bullet points
+    cleaned = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)  # **bold** / *italic*
+    cleaned = re.sub(r'^\s*\d+[\.\)]\s*', '', cleaned, flags=re.MULTILINE)  # 1. or 1)
+    cleaned = re.sub(r'^\s*[-•–]\s*', '', cleaned, flags=re.MULTILINE)  # bullet points
+    cleaned = re.sub(r'\s*[—–]\s*', '. ', cleaned)  # em-dashes as sentence breaks
+    cleaned = re.sub(r'\[\d+\]', '', cleaned)  # strip citation markers [1], [2]
+
+    # Split on sentence endings AND newlines (LLM often uses newlines between claims)
+    parts = re.split(r'(?<=[.!?])\s+|\n+', cleaned.strip())
     claims = []
-    for s in sentences:
+    for s in parts:
         s = s.strip().rstrip(".")
-        if len(s) > 15:
+        # Skip intro/header lines ending with colon
+        if s.endswith(":"):
+            continue
+        # Require minimum 20 chars and at least 3 words to be a real claim
+        if len(s) >= 20 and len(s.split()) >= 3:
             claims.append(s)
     return claims
 
@@ -160,7 +198,7 @@ class Evaluator:
 
     def compute_factual_correctness(
         self, response: str, chunks: list[RetrievedChunk],
-        max_claims: int = 4, max_chunks: int = 2,
+        max_claims: int = 4, max_chunks: int = 4,
     ) -> tuple[float, list[ClaimVerdict]]:
         if not chunks:
             return 0.0, []
@@ -172,6 +210,7 @@ class Evaluator:
         eval_claims = claims[:max_claims]
         eval_chunks = chunks[:max_chunks]
 
+        # --- NLI scoring ---
         pairs = []
         pair_map = []
         for ci, claim in enumerate(eval_claims):
@@ -180,27 +219,51 @@ class Evaluator:
                 pairs.append((text, claim))
                 pair_map.append((ci, chi))
 
-        scores = nli_batch_scores(pairs)
+        nli_scores = nli_batch_scores(pairs)
+
+        # --- Embedding-based claim-chunk similarity (fallback signal) ---
+        claim_embs = self._embedder.encode_batch(eval_claims)
+        chunk_texts = [
+            c.text if hasattr(c, 'text') else c.get("text", "")
+            for c in eval_chunks
+        ]
+        chunk_embs = self._embedder.encode_batch(chunk_texts)
 
         verdicts = []
         for ci, claim in enumerate(eval_claims):
-            best_score = 0.0
+            best_nli = 0.0
             best_evidence = ""
             best_source = ""
             for j, (c_idx, ch_idx) in enumerate(pair_map):
-                if c_idx == ci and scores[j] > best_score:
-                    best_score = scores[j]
+                if c_idx == ci and nli_scores[j] > best_nli:
+                    best_nli = nli_scores[j]
                     chunk = eval_chunks[ch_idx]
                     best_evidence = (chunk.text if hasattr(chunk, 'text') else chunk.get("text", ""))[:300]
                     best_source = chunk.doc_name if hasattr(chunk, 'doc_name') else chunk.get("metadata", {}).get("doc_name", "unknown")
 
-            if best_score >= verifier.verified_threshold:
+            # Embedding similarity: max cosine between this claim and all chunks
+            claim_vec = claim_embs[ci]
+            embed_sim = max(
+                float(np.dot(claim_vec, chunk_embs[k]) / (np.linalg.norm(claim_vec) * np.linalg.norm(chunk_embs[k]) + 1e-10))
+                for k in range(len(eval_chunks))
+            )
+            embed_sim = max(0.0, embed_sim)  # clamp negatives
+
+            # Blend: use NLI when it gives a real signal, otherwise lean on embedding similarity.
+            # If NLI < 0.05 (garbled text / no direct entailment), use embedding sim scaled
+            # into [0, 0.85] range so it can't fake a perfect score.
+            if best_nli < 0.05:
+                score = max(best_nli, embed_sim * 0.85)
+            else:
+                score = best_nli
+
+            if score >= verifier.verified_threshold:
                 verdict = "VERIFIED"
-            elif best_score <= verifier.contradicted_threshold:
+            elif score <= verifier.contradicted_threshold:
                 verdict = "CONTRADICTED"
             else:
                 verdict = "UNVERIFIABLE"
-            verdicts.append(ClaimVerdict(claim=claim, verdict=verdict, nli_score=round(best_score, 4), evidence=best_evidence, evidence_source=best_source))
+            verdicts.append(ClaimVerdict(claim=claim, verdict=verdict, nli_score=round(score, 4), evidence=best_evidence, evidence_source=best_source))
 
         f_c = sum(v.nli_score for v in verdicts) / len(verdicts)
         return round(f_c, 4), verdicts
@@ -211,10 +274,15 @@ class Evaluator:
         s_c = self.compute_semantic_consistency(response, chunks)
         f_c, verdicts = self.compute_factual_correctness(response, chunks)
 
-        if s_c + f_c > 0:
-            c_f = 2 * s_c * f_c / (s_c + f_c)
-        else:
-            c_f = 0.0
+        # Weighted confidence: C_f = α·S_c + β·F_c + γ·R_c
+        # R_c approximated as average retrieval score of top chunks
+        r_c = 0.0
+        if chunks:
+            r_c = sum(c.hybrid_score for c in chunks[:4]) / min(len(chunks), 4)
+            r_c = max(0.0, min(1.0, r_c))
+
+        c_f = calibration.alpha * s_c + calibration.beta * f_c + calibration.gamma * r_c
+        c_f = max(0.0, min(1.0, c_f))
 
         return EvaluationResult(
             semantic_consistency=round(s_c, 4),
